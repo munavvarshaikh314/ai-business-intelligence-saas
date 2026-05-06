@@ -1,0 +1,35 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Node
+node_modules/
+.next/
+dist/
+build/
+
+# Env
+.env
+.env.*
+
+# Storage / uploads
+app/storage/uploads/
+app/storage/faiss_indexes/
+app/storage/invoices/
+app/storage/ml_models/
+
+# DB / docker volumes
+postgres_data/
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
