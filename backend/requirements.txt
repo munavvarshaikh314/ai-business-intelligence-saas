@@ -11,6 +11,10 @@ pyjwt
 slowapi==0.1.9
 pandas
 numpy
+rank-bm25
+openai
+google-generativeai
+httpx
 scikit-learn
 joblib
 celery

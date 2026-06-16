@@ -32,6 +32,7 @@ class ChatMessageResponse(BaseModel):
 class AskRequest(BaseModel):
     session_id: str
     question: str
+    mode: Optional[str] = None
 
 
 class SourceItem(BaseModel):

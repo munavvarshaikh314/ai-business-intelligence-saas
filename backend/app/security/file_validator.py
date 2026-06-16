@@ -1,7 +1,7 @@
 from fastapi import HTTPException
 
 ALLOWED_EXTENSIONS = {"csv", "pdf"}
-MAX_FILE_SIZE_MB = 20
+MAX_FILE_SIZE_MB = 50
 
 
 class FileValidator:

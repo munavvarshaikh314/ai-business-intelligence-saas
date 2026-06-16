@@ -1,19 +1,30 @@
-export const connectChatSocket = (datasetId, sessionId, onMessage, onError) => {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
-  const wsUrl = apiUrl
-    .replace(/^http/, "ws")
-    .replace(/\/api\/v1\/?$/, `/ws/chat/${datasetId}/${sessionId}`);
+export const connectChatSocket = (sessionId, onMessage, onError) => {
+  const WS_BASE =
+    process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8000/ws/chat";
 
-  const socket = new WebSocket(wsUrl);
+  const socket = new WebSocket(`${WS_BASE}/${sessionId}`);
+
+  socket.onopen = () => {
+    console.log("WebSocket connected");
+  };
 
   socket.onmessage = (event) => {
     try {
-      onMessage(JSON.parse(event.data));
-    } catch {
-      onMessage({ type: "token", data: event.data });
+      const data = JSON.parse(event.data);
+      if (onMessage) onMessage(data);
+    } catch (err) {
+      console.log("Invalid WS message", event.data);
     }
   };
 
-  socket.onerror = onError;
+  socket.onerror = (err) => {
+    console.log("WebSocket error", err);
+    if (onError) onError(err);
+  };
+
+  socket.onclose = () => {
+    console.log("WebSocket closed");
+  };
+
   return socket;
 };

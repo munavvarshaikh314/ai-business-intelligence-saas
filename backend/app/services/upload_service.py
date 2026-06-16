@@ -24,66 +24,155 @@ UPLOAD_DIR = "app/storage/uploads"
 
 class UploadService:
 
-    @staticmethod
     def ensure_upload_dir():
-     os.makedirs(UPLOAD_DIR, exist_ok=True)
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+    
+    @staticmethod
+    def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    # remove unnamed columns
+        df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
+
+    # strip column names
+        df.columns = [col.strip() for col in df.columns]
+
+    # drop fully empty rows
+        df = df.dropna(how="all")
+
+    # clean values + convert numeric safely
+        for col in df.columns:
+            df[col] = df[col].astype(str).str.replace(",", "").str.replace("₹", "").str.strip()
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # fill remaining NaNs
+            df = df.fillna("")
+
+            return df
+
+    def infer_sql_type(series: pd.Series) -> str:
+        if pd.api.types.is_integer_dtype(series):
+            return "INTEGER"
+        if pd.api.types.is_float_dtype(series):
+            return "FLOAT"
+        if pd.api.types.is_bool_dtype(series):
+            return "BOOLEAN"
+        if pd.api.types.is_datetime64_any_dtype(series):
+            return "TIMESTAMP"
+        return "TEXT"
 
     @staticmethod
-    def build_pdf_faiss_index(dataset_id: str, user_id: str, file_path: str):
+    def drop_table_if_exists(db: Session, table_name: str):
+        query = text(f'DROP TABLE IF EXISTS "{table_name}" CASCADE')
+        db.execute(query)
+        db.commit()
+
+    @staticmethod
+    def create_table_from_dataframe(db: Session, table_name: str, df: pd.DataFrame):
+        columns_sql = []
+
+        for col in df.columns:
+            safe_col = sanitize_column_name(col)
+            sql_type = UploadService.infer_sql_type(df[col])
+            columns_sql.append(f'"{safe_col}" {sql_type}')
+
+        create_query = text(f'CREATE TABLE "{table_name}" ({", ".join(columns_sql)})')
+        db.execute(create_query)
+        db.commit()
+
+    @staticmethod
+    def insert_dataframe_into_table(db: Session, table_name: str, df: pd.DataFrame):
+        safe_cols = [sanitize_column_name(c) for c in df.columns]
+
+        for _, row in df.iterrows():
+            values = []
+            for value in row.tolist():
+                if value == "":
+                    values.append("NULL")
+                else:
+                    values.append("'" + str(value).replace("'", "''") + "'")
+
+            column_names = ", ".join([f'"{c}"' for c in safe_cols])
+            insert_query = text(
+                f'INSERT INTO "{table_name}" ({column_names}) VALUES ({", ".join(values)})'
+            )
+
+            db.execute(insert_query)
+
+        db.commit()
+
+    @staticmethod
+    def build_pdf_faiss_index(dataset_id: str, user_id: str, file_path: str, file_id: str = None):
         db: Session = SessionLocal()
+        file_record = None
+        try:
+            if file_id:
+                file_record = db.query(File).filter(
+                    File.id == file_id,
+                    File.dataset_id == dataset_id,
+                    File.user_id == user_id,
+                ).first()
+            else:
+                file_record = db.query(File).filter(
+                    File.dataset_id == dataset_id,
+                    File.user_id == user_id,
+                    File.file_type == "pdf",
+                    File.file_path == file_path,
+                ).order_by(File.uploaded_at.desc()).first()
 
-        # delete old chunks if reindexing
-        db.query(DocumentChunk).filter(DocumentChunk.dataset_id == dataset_id).delete()
-        db.commit()
+            if not file_record:
+                raise Exception("Uploaded PDF file record not found")
 
-        reader = PdfReader(file_path)
+            # delete old chunks if reindexing
+            db.query(DocumentChunk).filter(DocumentChunk.dataset_id == dataset_id).delete()
+            db.commit()
 
-        all_chunks = []
-        chunk_metadata = []
-        chunk_counter = 0
+            reader = PdfReader(file_path)
 
-        for page_no, page in enumerate(reader.pages):
-            page_text = page.extract_text()
-            if not page_text:
-                continue
+            all_chunks = []
+            chunk_metadata = []
+            chunk_counter = 0
 
-            chunks = chunk_text(page_text, chunk_size=700, overlap=150)
+            for page_no, page in enumerate(reader.pages):
+                page_text = page.extract_text()
+                if not page_text:
+                    continue
 
-            for _, chunk in chunks:
-                all_chunks.append(chunk)
+                chunks = chunk_text(page_text, chunk_size=700, overlap=150)
 
-                chunk_metadata.append({
-                    "chunk_index": chunk_counter,
-                    "page_number": page_no + 1
-                })
+                for _, chunk in chunks:
+                    all_chunks.append(chunk)
 
-                chunk_obj = DocumentChunk(
-                    dataset_id=dataset_id,
-                    chunk_text=chunk,
-                    chunk_index=chunk_counter,
-                    page_number=page_no + 1
-                )
+                    chunk_metadata.append({
+                        "chunk_index": chunk_counter, "page_number": page_no + 1, "content": chunk})
 
-                db.add(chunk_obj)
-                chunk_counter += 1
+                    chunk_obj = DocumentChunk(
+                        dataset_id=dataset_id,
+                        file_id=file_record.id,
+                        content=chunk,
+                        chunk_index=chunk_counter,
+                    )
 
-        db.commit()
+                    db.add(chunk_obj)
+                    chunk_counter += 1
 
-        if not all_chunks:
-            raise Exception("No readable text found in PDF")
+            db.commit()
 
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        embeddings = model.encode(all_chunks, show_progress_bar=True)
+            if not all_chunks:
+                raise Exception("No readable text found in PDF")
 
-        embeddings = np.array(embeddings).astype("float32")
+            model = SentenceTransformer("all-MiniLM-L6-v2")
+            embeddings = model.encode(all_chunks, show_progress_bar=True)
 
-        dimension = embeddings.shape[1]
-        index = faiss.IndexFlatL2(dimension)
-        index.add(embeddings)
+            embeddings = np.array(embeddings).astype("float32")
 
-        save_faiss_index(dataset_id, index, chunk_metadata)
+            dimension = embeddings.shape[1]
+            index = faiss.IndexFlatL2(dimension)
+            index.add(embeddings)
 
-        return True
+            save_faiss_index(dataset_id, index, chunk_metadata)
+
+            return True
+        finally:
+            db.close()
 
     @staticmethod
     async def upload_csv(dataset_id: str, user_id: str, file: UploadFile):
@@ -166,6 +255,20 @@ class UploadService:
             db.add(column_obj)
 
         db.commit()
+        
+        # Auto-train ML model in background
+
+        try:
+            from app.services.ml_model_service import MLModelService
+            import threading
+            thread = threading.Thread(
+                target=MLModelService.auto_train,
+                args=(user_id, dataset_id, file_path),
+                daemon=True
+            )
+            thread.start()
+        except Exception:
+            pass  # Auto-train failure never blocks upload
 
         return {
             "message": "CSV uploaded successfully and SQL table created",
@@ -207,6 +310,7 @@ class UploadService:
         )
         db.add(new_file)
         db.commit()
+        db.refresh(new_file)
 
         # ---------------------------
         # Extract PDF text page-wise
@@ -226,20 +330,22 @@ class UploadService:
 
             chunks = chunk_text(page_text, chunk_size=700, overlap=150)
 
-            for idx, chunk in chunks:
+            # for idx, chunk in chunks:
+            for chunk in chunks:
                 all_chunks.append(chunk)
 
                 chunk_metadata.append({
                     "chunk_index": chunk_counter,
-                    "page_number": page_no + 1
+                    "page_number": page_no + 1,
+                    "content": chunk  # ← required for RAG retrieval
                 })
 
                 # Save chunk into DB
                 chunk_obj = DocumentChunk(
                     dataset_id=dataset_id,
-                    chunk_text=chunk,
+                    file_id=new_file.id,
+                    content=chunk,
                     chunk_index=chunk_counter,
-                    page_number=page_no + 1
                 )
 
                 db.add(chunk_obj)
@@ -274,44 +380,61 @@ class UploadService:
     @staticmethod
     async def save_pdf_file_only(dataset_id: str, user_id: str, file: UploadFile):
         db: Session = SessionLocal()
+        try:
+            dataset = db.query(Dataset).filter(
+                Dataset.id == dataset_id,
+                Dataset.user_id == user_id
+            ).first()
 
-        dataset = db.query(Dataset).filter(
-            Dataset.id == dataset_id,
-            Dataset.user_id == user_id
-        ).first()
+            if not dataset:
+                raise HTTPException(status_code=404, detail="Dataset not found")
 
-        if not dataset:
-            raise HTTPException(status_code=404, detail="Dataset not found")
+            if not file.filename.endswith(".pdf"):
+                raise HTTPException(status_code=400, detail="Only PDF files allowed")
 
-        if not file.filename.endswith(".pdf"):
-            raise HTTPException(status_code=400, detail="Only PDF files allowed")
+            UploadService.ensure_upload_dir()
 
-        UploadService.ensure_upload_dir()
+            file_path = os.path.join(UPLOAD_DIR, file.filename)
 
-        file_path = os.path.join(UPLOAD_DIR, file.filename)
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
 
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            new_file = File(
+                user_id=user_id,
+                dataset_id=dataset_id,
+                file_name=file.filename,
+                file_type="pdf",
+                file_path=file_path,
+                file_size=os.path.getsize(file_path)
+            )
 
-        new_file = File(
-            user_id=user_id,
-            dataset_id=dataset_id,
-            file_name=file.filename,
-            file_type="pdf",
-            file_path=file_path,
-            file_size=os.path.getsize(file_path)
-        )
+            db.add(new_file)
 
-        db.add(new_file)
+            dataset.index_status = "QUEUED"
+            dataset.index_progress = 0
 
-        dataset.index_status = "PROCESSING"
-        dataset.index_progress = 0
+            db.commit()
 
-        db.commit()
-
-        return {"file_path": file_path}
+            db.refresh(new_file)
+            return {"file_path": file_path, "file_id": str(new_file.id)}
+        finally:
+            db.close()
 
     @staticmethod
     def get_upload_status(dataset_id: str, user_id: str):
-        # Optional for async indexing
-        return {"status": "completed"}
+        db: Session = SessionLocal()
+
+        dataset = db.query(Dataset).filter(
+        Dataset.id == dataset_id,
+        Dataset.user_id == user_id
+        ).first()
+
+        if not dataset:
+         raise HTTPException(status_code=404, detail="Dataset not found")
+
+        return {
+        "dataset_id": dataset.id,
+        "status": dataset.index_status,
+        "progress": dataset.index_progress
+    }
+

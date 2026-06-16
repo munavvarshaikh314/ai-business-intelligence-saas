@@ -38,22 +38,12 @@ def sanitize_table_name(name: str) -> str:
 
 
 def is_safe_select_query(sql: str) -> bool:
-    """
-    Allow only SELECT queries. Block dangerous keywords.
-    """
-    sql_clean = sql.strip().lower()
-
-    blocked_keywords = [
-        "drop", "delete", "update", "insert",
-        "alter", "truncate", "create", "grant",
-        "revoke", "commit", "rollback"
-    ]
-
-    if not sql_clean.startswith("select"):
+    import re
+    sql_clean = sql.rstrip(";").strip().lower()
+    if not (sql_clean.startswith("select") or sql_clean.startswith("with")):
         return False
-
-    for keyword in blocked_keywords:
-        if keyword in sql_clean:
+    blocked = ["drop", "delete", "update", "insert", "alter", "grant", "revoke"]
+    for keyword in blocked:
+        if re.search(rf"\b{keyword}\b", sql_clean):
             return False
-
     return True

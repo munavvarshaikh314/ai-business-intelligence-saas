@@ -9,6 +9,13 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 60
 
     REDIS_URL: str = "redis://localhost:6379"
+    
+    # Gemini (free tier) — get key at aistudio.google.com/app/apikey
+    
+    LLM_PROVIDER: str = "gemini"
+    
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
 
     OPENAI_API_KEY: str = ""
     CELERY_BROKER_URL: str = ""

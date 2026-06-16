@@ -60,17 +60,20 @@ class HybridSearchService:
         return results
 
     @staticmethod
-    def hybrid_search(dataset_id: str, query: str, top_k=5):
+    def hybrid_search_with_scores(dataset_id: str, query: str, top_k=5):
         db: Session = SessionLocal()
 
-        all_chunks = db.query(DocumentChunk).filter(
-            DocumentChunk.dataset_id == dataset_id
-        ).order_by(DocumentChunk.chunk_index.asc()).all()
+        try:
+            all_chunks = db.query(DocumentChunk).filter(
+                DocumentChunk.dataset_id == dataset_id
+            ).order_by(DocumentChunk.chunk_index.asc()).all()
+        finally:
+            db.close()
 
         if not all_chunks:
             return []
 
-        chunk_texts = [c.chunk_text for c in all_chunks]
+        chunk_texts = [c.content for c in all_chunks]
 
         # Get BM25 results
         bm25_results = HybridSearchService.bm25_search(chunk_texts, query, top_k=top_k)
@@ -92,22 +95,30 @@ class HybridSearchService:
         # Sort by combined score
         combined_sorted = sorted(score_map.items(), key=lambda x: x[1], reverse=True)
 
-        # Take top_k candidates for reranking
-        candidate_indices = [idx for idx, _ in combined_sorted[:top_k * 2]]
+        candidate_indices = [idx for idx, _ in combined_sorted[:top_k]]
 
-        candidates = []
+        scored_candidates = []
+        score_by_idx = dict(combined_sorted)
         for idx in candidate_indices:
-            chunk_obj = all_chunks[idx]
-            candidates.append(chunk_obj)
+            if 0 <= idx < len(all_chunks):
+                scored_candidates.append((all_chunks[idx], float(score_by_idx.get(idx, 0.0))))
 
-        return candidates
+        return scored_candidates
+
+    @staticmethod
+    def hybrid_search(dataset_id: str, query: str, top_k=5):
+        return [
+            chunk for chunk, _ in HybridSearchService.hybrid_search_with_scores(
+                dataset_id, query, top_k=top_k
+            )
+        ]
 
     @staticmethod
     def rerank(query: str, chunk_objects, top_k=5):
         """
         Cross encoder reranking (very accurate)
         """
-        pairs = [(query, c.chunk_text) for c in chunk_objects]
+        pairs = [(query, c.content) for c in chunk_objects]
         scores = HybridSearchService.get_reranker().predict(pairs)
 
         scored = list(zip(chunk_objects, scores))

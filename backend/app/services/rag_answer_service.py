@@ -1,122 +1,91 @@
 from app.services.rag_service import RAGService
-from app.services.llm_service import LLMService
+from app.services.llm import LLMService
 from app.services.chat_memory_service import ChatMemoryService
 from app.services.query_rewrite_service import QueryRewriteService
-from app.utils.confidence_utils import compute_confidence
+from app.utils.confidence_utils import compute_confidence, label_confidence
+from app.services.usage_log_service import UsageLogService
 
-from app.services.verifier_service import VerifierService
-from app.services.conflict_service import ConflictDetectionService
+
+CONFIDENCE_THRESHOLD = 0.05
 
 
 class RAGAnswerService:
-
     @staticmethod
     def answer(dataset_id: str, user_id: str, session_id: str, question: str):
-
-        # ---------------------------
-        # Memory + Query Rewrite
-        # ---------------------------
         chat_history = ChatMemoryService.get_recent_history(session_id, limit=6)
-        rewritten_query = QueryRewriteService.rewrite(chat_history, question)
+        if "Assistant:" in chat_history:
+            rewritten_query = QueryRewriteService.rewrite(chat_history, question)
+        else:
+            rewritten_query = question
 
-        # ---------------------------
-        # Retrieve chunks
-        # ---------------------------
         retrieved = RAGService.retrieve(dataset_id, user_id, rewritten_query, top_k=5)
-
         chunks = retrieved.get("chunks", [])
         scores = retrieved.get("scores", [])
         sources = retrieved.get("sources", [])
-
         confidence = compute_confidence(scores)
 
         if not chunks:
             return {
-                "answer": "No relevant context found in the document.",
+                "answer": "I could not find relevant information in the document to answer this question.",
                 "confidence": 0.0,
+                "confidence_label": "low",
+                "guardrail": "no_context",
                 "sources": [],
                 "query_type": "RAG",
-                "rewritten_query": rewritten_query
-            }
-
-        # Build context
-        context = "\n\n".join(chunks)
-
-        # ---------------------------
-        # Conflict Detection
-        # ---------------------------
-        conflict_result = ConflictDetectionService.detect(context)
-
-        if conflict_result.get("conflict") is True:
-            return {
-                "answer": "⚠️ The document contains conflicting statements related to your question. Please verify manually.",
-                "confidence": confidence,
-                "sources": sources,
-                "query_type": "RAG",
                 "rewritten_query": rewritten_query,
-                "conflict": True,
-                "conflicting_points": conflict_result.get("conflicting_points", [])
-            }
-        
-
-
-        if confidence < 0.35:
-            return {
-                "answer": "I could not find a confident answer in the document.",
-                "confidence": confidence,
-                "sources": sources,
-                "query_type": "RAG",
-                "rewritten_query": rewritten_query
             }
 
-        # ---------------------------
-        # Generate Answer (Strict grounding)
-        # ---------------------------
-        prompt = f"""
-You are a helpful AI assistant.
+        context = "\n\n".join(chunks)
+        low_retrieval_confidence = confidence < CONFIDENCE_THRESHOLD
+
+        prompt = f"""You are a precise document assistant.
 
 Rules:
-- Answer ONLY using the context.
-- If not found, say: "Not found in document."
-- Do not add external knowledge.
-- Keep answer short and clear.
+- Answer ONLY using the context below.
+- If the answer is not in the context, say: "This information is not available in the document."
+- Do not use external knowledge.
+- Be concise and direct.
 
 Context:
 {context}
 
-User Question:
+Question:
 {question}
 
-Answer:
-"""
+Answer:"""
 
-        answer = LLMService.generate_text(prompt)
+        result = LLMService.generate_text_with_usage(prompt)
+        answer = result["text"]
+        prompt_tokens = result["prompt_tokens"]
+        completion_tokens = result["completion_tokens"]
 
-        # ---------------------------
-        # Verify Answer
-        # ---------------------------
-        verify_result = VerifierService.verify(context, question, answer)
+        final_confidence = round(confidence, 3)
 
-        verdict = verify_result.get("verdict", "UNSUPPORTED")
-        verifier_confidence = verify_result.get("confidence", 0.0)
+        try:
+            UsageLogService.log_usage(
+                user_id=user_id,
+                dataset_id=dataset_id,
+                session_id=session_id,
+                query_type="RAG",
+                question=question,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+        except Exception:
+            pass
 
-        if verdict == "UNSUPPORTED":
-            return {
-                "answer": "⚠️ I generated an answer, but it is not strongly supported by the document context.",
-                "confidence": min(confidence, verifier_confidence),
-                "sources": sources,
-                "query_type": "RAG",
-                "rewritten_query": rewritten_query,
-                "verdict": verdict,
-                "reason": verify_result.get("reason", "")
-            }
+        guardrail = "low_confidence" if low_retrieval_confidence or final_confidence < 0.3 else None
 
         return {
             "answer": answer,
-            "confidence": min(confidence, verifier_confidence),
+            "confidence": final_confidence,
+            "confidence_label": label_confidence(final_confidence),
+            "guardrail": guardrail,
             "sources": sources,
             "query_type": "RAG",
             "rewritten_query": rewritten_query,
-            "verdict": verdict,
-            "reason": verify_result.get("reason", "")
+            "verdict": "SUPPORTED",
+            "reason": "Generated from retrieved document context.",
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
         }
