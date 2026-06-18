@@ -25,7 +25,7 @@ from app.routes.payment_history_routes import router as payment_history_router
 from app.routes.invoice_routes import router as invoice_router
 from app.routes.ml_routes import router as ml_router
 from app.routes.memory_routes import router as memory_router
-from prometheus_fastapi_instrumentator import Instrumentator
+#from prometheus_fastapi_instrumentator import Instrumentator
 
 log = logging.getLogger("ai_bi_dashboard")
 
@@ -59,7 +59,7 @@ app = FastAPI(
     lifespan=lifespan  # ← key change
 )
 
-Instrumentator().instrument(app).expose(app)
+#Instrumentator().instrument(app).expose(app)
 
 sentry_dsn = settings.SENTRY_DSN.strip().strip("\"'")
 if sentry_dsn.startswith(("http://", "https://")):
