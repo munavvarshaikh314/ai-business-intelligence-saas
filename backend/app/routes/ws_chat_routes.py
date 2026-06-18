@@ -8,7 +8,7 @@ from app.services.query_rewrite_service import QueryRewriteService
 from app.services.rag_service import RAGService
 from app.services.llm_service import LLMService
 from app.utils.confidence_utils import compute_confidence
-
+from app.services.logging_service import LoggingService
 router = APIRouter()
 
 
@@ -125,4 +125,4 @@ Answer:
             })
 
     except WebSocketDisconnect:
-        print("Client disconnected")
+        LoggingService.info("Client disconnected")

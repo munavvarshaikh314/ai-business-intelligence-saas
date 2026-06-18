@@ -1,6 +1,6 @@
 from app.services.llm import LLMService # Make sure this points to your retry-enabled LLMService
 from app.services.query_rewrite_prompt import build_rewrite_prompt
-
+from app.services.logging_service import LoggingService
 class QueryRewriteService:
 
     @staticmethod
@@ -20,14 +20,14 @@ class QueryRewriteService:
                 return question
                 
             # 🔥 Add these prints so you can see the magic happen in your terminal!
-            print(f"🔍 [DEBUG] Original Query: '{question}'")
-            print(f"✨ [DEBUG] Rewritten Query: '{rewritten}'")
+            LoggingService.debug(f"🔍 [DEBUG] Original Query: '{question}'")
+            LoggingService.debug(f"✨ [DEBUG] Rewritten Query: '{rewritten}'")
 
             return rewritten
             
         except Exception as e:
             # If the AI fails (like a rate limit), just use the original question instead of crashing!
-            print(f"⚠️ [WARNING] Query Rewrite Failed: {e}. Falling back to original question.")
+            LoggingService.warning(f"⚠️ [WARNING] Query Rewrite Failed: {e}. Falling back to original question.")
             return question
 
 

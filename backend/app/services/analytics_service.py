@@ -7,6 +7,7 @@ from app.database import SessionLocal
 from app.models.dataset_model import Dataset
 from app.models.dataset_row_model import DatasetRow
 from app.utils.sql_utils import is_safe_select_query
+from app.services.logging_service import LoggingService
 
 
 class AnalyticsService:
@@ -95,7 +96,7 @@ class AnalyticsService:
             return False
 
         except Exception as e:
-            print("NUMERIC CHECK FAILED:", col, str(e))
+            LoggingService.info("NUMERIC CHECK FAILED:", col, str(e))
             db.rollback()
             return False
 
@@ -107,7 +108,7 @@ class AnalyticsService:
            col_l = col.lower()
            if any(k in col_l for k in keywords):
             candidates.append(col)
-        print("CANDIDATES:", candidates)    
+        LoggingService.info("CANDIDATES:", candidates)    
 
         
 
@@ -186,14 +187,18 @@ class AnalyticsService:
                         text(f'SELECT COUNT(DISTINCT "{order_col}") FROM "{table_name}"')
                     ).scalar() or total_rows
 
-                except Exception:
+                except Exception as e:
                     db.rollback()
                     total_orders = total_rows
-                    
-                    print("COLUMNS:", columns)
-                    print("REVENUE_COL:", revenue_col)
-                    print("PROFIT_COL:", profit_col)
-                    print("ORDER_COL:", order_col)
+
+                    LoggingService.warning(
+                    f"Failed to calculate total_orders. Falling back to total_rows. Error: {e}"
+                    )
+
+                LoggingService.debug(f"Columns: {columns}")
+                LoggingService.debug(f"Revenue Column: {revenue_col}")
+                LoggingService.debug(f"Profit Column: {profit_col}")
+                LoggingService.debug(f"Order Column: {order_col}")
 
             return {
                 "total_rows": int(total_rows),
