@@ -1,4 +1,4 @@
-from app.services.llm_service import LLMService
+from app.services.llm import LLMService
 
 
 class IntentRouter:

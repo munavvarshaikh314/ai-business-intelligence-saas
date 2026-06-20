@@ -96,7 +96,9 @@ class AnalyticsService:
             return False
 
         except Exception as e:
-            LoggingService.info("NUMERIC CHECK FAILED:", col, str(e))
+            LoggingService.warning(
+                f"Numeric check failed | column={col} | error={e}"
+            )
             db.rollback()
             return False
 
@@ -108,7 +110,7 @@ class AnalyticsService:
            col_l = col.lower()
            if any(k in col_l for k in keywords):
             candidates.append(col)
-        LoggingService.info("CANDIDATES:", candidates)    
+        LoggingService.info(f"CANDIDATES: {candidates}")   
 
         
 
@@ -192,7 +194,7 @@ class AnalyticsService:
                     total_orders = total_rows
 
                     LoggingService.warning(
-                    f"Failed to calculate total_orders. Falling back to total_rows. Error: {e}"
+                        f"Failed to calculate total_orders | fallback=total_rows | error={e}"
                     )
 
                 LoggingService.debug(f"Columns: {columns}")
