@@ -89,7 +89,7 @@ app.include_router(prediction_router,       prefix="/api/v1/predict",          t
 app.include_router(ml_router,               prefix="/api/v1/ml",               tags=["ML"])
 app.include_router(credit_router,           prefix="/api/v1/credits",          tags=["Credits"])
 app.include_router(payment_router,          prefix="/api/v1/payments",         tags=["Payments"])
-app.include_router(payment_history_router, prefix="/api/v1/payments/history",  tags=["Payment History"])
+app.include_router(payment_history_router, prefix="/api/v1/payments",          tags=["Payment History"])
 app.include_router(invoice_router,          prefix="/api/v1/invoices",         tags=["Invoices"])
 app.include_router(memory_router,           prefix="/api/v1/memory",           tags=["Memory"])
 app.include_router(admin_router,            prefix="/api/v1/admin",            tags=["Admin"])

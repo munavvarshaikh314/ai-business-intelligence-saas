@@ -2,7 +2,8 @@ from sqlalchemy.orm import Session
 from app.database import SessionLocal
 from app.models.chat_message_model import ChatMessage
 from app.models.conversation_memory_model import ConversationMemory
-from app.services.llm_service import LLMService
+#from app.services.llm_service import LLMService
+from app.services.llm import LLMService
 
 
 class MemorySummarizerService:
