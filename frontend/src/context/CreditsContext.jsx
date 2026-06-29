@@ -21,9 +21,15 @@ export function CreditsProvider({ children }) {
     }
   };
 
-  useEffect(() => {
+const { user } = useAuth();
+
+useEffect(() => {
+  if (user) {
     loadCredits();
-  }, []);
+  } else {
+    setCredits(0);
+  }
+}, [user]);
 
   return (
     <CreditsContext.Provider

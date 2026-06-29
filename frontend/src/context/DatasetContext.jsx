@@ -38,9 +38,20 @@ export function DatasetProvider({ children }) {
     }
   };
 
-  useEffect(() => {
+const { user } = useAuth();
+
+useEffect(() => {
+  if (user) {
     loadDatasets();
-  }, []);
+  } else {
+    setDatasets([]);
+    setActiveDataset(null);
+    localStorage.removeItem("activeDatasetId");
+  }
+}, [user]);
+  // useEffect(() => {
+  //   loadDatasets();
+  // }, []);
 
   const selectDataset = (dataset) => {
     setActiveDataset(dataset);
